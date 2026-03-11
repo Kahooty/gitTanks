@@ -1,2 +1,2 @@
 # gitTanks
-Git contribution graph activity stylized and containing a retro-style tanks game.
+A retro tanks game built from your GitHub contribution graph. Every commit shapes the battlefield.
