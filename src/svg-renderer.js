@@ -14,7 +14,7 @@ const CELL_SIZE = 12;
 const CELL_GAP = 2;
 const CELL_PITCH = CELL_SIZE + CELL_GAP;
 const GRID_LEFT = 24;
-const GRID_TOP = 32;
+const GRID_TOP = 10;
 const TANK_SIZE = 10;
 const BULLET_R = 2;
 const FRAME_MS = 350;
@@ -37,7 +37,7 @@ function shortestArc(current, target) {
   return current + diff;
 }
 
-function renderSVG(gameResult, themeName = 'light', username = '') {
+function renderSVG(gameResult, themeName = 'light') {
   const theme = themes[themeName] || themes.light;
   const { frames, allBullets, explosions, wallEvents, muzzleFlashes,
           tanks, grid, cols, rows, initialGrid } = gameResult;
@@ -192,7 +192,6 @@ function renderSVG(gameResult, themeName = 'light', username = '') {
   svg += `<style>\n`;
   svg += `  .bg { fill: ${theme.background}; }\n`;
   svg += `  .grid-cell { rx: 2; ry: 2; }\n`;
-  svg += `  .title-text { font: bold 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: ${theme.text}; }\n`;
   svg += `  .sub-text { font: 9px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: ${theme.textMuted}; }\n`;
   svg += `  .score-name { font: bold 9px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }\n`;
   svg += `  .score-stat { font: 9px monospace; }\n`;
@@ -202,11 +201,6 @@ function renderSVG(gameResult, themeName = 'light', username = '') {
 
   // ── Background ──
   svg += `<rect class="bg" width="${svgWidth}" height="${svgHeight}" />\n`;
-
-  // ── Title ──
-  const titleText = username ? `${username}'s Tank Battle` : 'Tank Battle';
-  svg += `<text class="title-text" x="${GRID_LEFT}" y="16">\u{1F3AE} ${titleText}</text>\n`;
-  svg += `<text class="sub-text" x="${GRID_LEFT}" y="26">Contribution Grid Battlefield</text>\n`;
 
   // ── Grid: ground + walls ──
   svg += `<g id="grid">\n`;

@@ -76,7 +76,11 @@ async function fetchContributions(username, token) {
     throw new Error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
   }
 
-  const weeks = data.user.contributionsCollection.contributionCalendar.weeks;
+  if (!data.data || !data.data.user) {
+    throw new Error(`User "${username}" not found on GitHub.`);
+  }
+
+  const weeks = data.data.user.contributionsCollection.contributionCalendar.weeks;
 
   // Build a 2D grid: grid[col][row] where col=week (0-51), row=day (0-6)
   const grid = [];

@@ -352,7 +352,7 @@ function simulateGame(grid, options = {}) {
 
     const aliveTanks = tanks.filter(t => t.alive);
     if (aliveTanks.length <= 1) {
-      for (let extra = 0; extra < 40; extra++) {
+      for (let extra = 0; extra < 8; extra++) {
         frames.push({
           frame: frame + extra + 1,
           tanks: tanks.map(t => ({

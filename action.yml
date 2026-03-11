@@ -1,5 +1,5 @@
-name: 'Generate Tank Battle Contribution Graph'
-description: 'Transform your GitHub contribution graph into an animated Tank Battle SVG!'
+name: 'gitTanks — Tank Battle Contribution Graph'
+description: 'Transform your GitHub contribution graph into a retro-style animated Tank Battle SVG!'
 author: 'Kahooty'
 
 inputs:
@@ -7,7 +7,7 @@ inputs:
     description: 'GitHub username to generate the tank battle for'
     required: true
   github_token:
-    description: 'GitHub token for API access (defaults to GITHUB_TOKEN)'
+    description: 'GitHub token for GraphQL API access'
     required: false
     default: ${{ github.token }}
 
@@ -25,11 +25,13 @@ runs:
         cd ${{ github.action_path }}
         npm install
 
-    - name: Generate Tank Battle SVG
+    - name: Generate Tank Battle SVGs
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         cd ${{ github.action_path }}
-        node index.js --username "${{ inputs.github_user_name }}" --token "${{ inputs.github_token }}"
+        node index.js --username "${{ inputs.github_user_name }}" --token "$GITHUB_TOKEN"
         mkdir -p ${{ github.workspace }}/dist
         cp dist/*.svg ${{ github.workspace }}/dist/
 
