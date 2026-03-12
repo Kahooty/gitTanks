@@ -1,10 +1,10 @@
 /**
  * game-engine.js
- * Tank Battle game simulation on the contribution grid
+ * Tank Battle game simulation on the contribution grid.
  *
- * Activity blocks (contribution cells with level > 0) are walls.
- * Walls are always destroyed in a single shot.
- * Tanks must shoot to clear a blocked path.
+ * Walls are edge-based: thin maze walls drawn in the gaps between cells.
+ * Activity nodes serve as background only (no gameplay impact).
+ * The maze is generated randomly each game (seeded) via DFS + extra openings.
  */
 
 const DIRECTIONS = {
@@ -33,6 +33,95 @@ class RNG {
   }
 }
 
+/**
+ * Generate a maze on the grid using edge walls (walls between cells).
+ *
+ * hWalls[c][r] = true → wall between cell (c,r) and (c,r+1)
+ * vWalls[c][r] = true → wall between cell (c,r) and (c+1,r)
+ *
+ * Algorithm:
+ *  1. Start with all internal walls present
+ *  2. Randomized DFS (recursive backtracker) to carve a spanning tree
+ *  3. Remove additional walls (~30%) to create loops and wider passages
+ *  4. Clear walls around the four spawn corners
+ */
+function generateMaze(cols, rows, rng) {
+  // hWalls: cols × (rows-1)
+  const hWalls = [];
+  for (let c = 0; c < cols; c++) {
+    hWalls[c] = [];
+    for (let r = 0; r < rows - 1; r++) {
+      hWalls[c][r] = true;
+    }
+  }
+  // vWalls: (cols-1) × rows
+  const vWalls = [];
+  for (let c = 0; c < cols - 1; c++) {
+    vWalls[c] = [];
+    for (let r = 0; r < rows; r++) {
+      vWalls[c][r] = true;
+    }
+  }
+
+  // DFS maze generation (recursive backtracker)
+  const visited = [];
+  for (let c = 0; c < cols; c++) {
+    visited[c] = [];
+    for (let r = 0; r < rows; r++) {
+      visited[c][r] = false;
+    }
+  }
+
+  const stack = [];
+  const startC = rng.nextInt(cols);
+  const startR = rng.nextInt(rows);
+  visited[startC][startR] = true;
+  stack.push({ c: startC, r: startR });
+
+  while (stack.length > 0) {
+    const { c, r } = stack[stack.length - 1];
+    const neighbors = [];
+    if (r > 0 && !visited[c][r - 1])       neighbors.push({ c, r: r - 1, wType: 'h', wc: c, wr: r - 1 });
+    if (r < rows - 1 && !visited[c][r + 1]) neighbors.push({ c, r: r + 1, wType: 'h', wc: c, wr: r });
+    if (c > 0 && !visited[c - 1][r])       neighbors.push({ c: c - 1, r, wType: 'v', wc: c - 1, wr: r });
+    if (c < cols - 1 && !visited[c + 1][r]) neighbors.push({ c: c + 1, r, wType: 'v', wc: c, wr: r });
+
+    if (neighbors.length === 0) {
+      stack.pop();
+      continue;
+    }
+
+    const next = rng.pick(neighbors);
+    if (next.wType === 'h') hWalls[next.wc][next.wr] = false;
+    else vWalls[next.wc][next.wr] = false;
+    visited[next.c][next.r] = true;
+    stack.push({ c: next.c, r: next.r });
+  }
+
+  // Remove extra walls to create loops and wider corridors for gameplay
+  const remaining = [];
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows - 1; r++) {
+      if (hWalls[c][r]) remaining.push({ type: 'h', c, r });
+    }
+  }
+  for (let c = 0; c < cols - 1; c++) {
+    for (let r = 0; r < rows; r++) {
+      if (vWalls[c][r]) remaining.push({ type: 'v', c, r });
+    }
+  }
+
+  const toRemove = Math.floor(remaining.length * 0.30);
+  const shuffled = rng.shuffle(remaining);
+  for (let i = 0; i < toRemove; i++) {
+    const w = shuffled[i];
+    if (w.type === 'h') hWalls[w.c][w.r] = false;
+    else vWalls[w.c][w.r] = false;
+  }
+
+  return { hWalls, vWalls };
+}
+
 function simulateGame(grid, options = {}) {
   const {
     maxFrames = 600,
@@ -47,87 +136,97 @@ function simulateGame(grid, options = {}) {
   const cols = grid.length;
   const rows = grid[0] ? grid[0].length : 7;
 
-  // Wall map: true = wall exists, false = open ground
-  // Activity blocks (level > 0) ARE walls. One shot destroys them.
-  const wallMap = [];
-  for (let c = 0; c < cols; c++) {
-    wallMap[c] = [];
-    for (let r = 0; r < rows; r++) {
-      wallMap[c][r] = grid[c][r].level > 0;
-    }
-  }
+  // Generate edge-based maze
+  const { hWalls, vWalls } = generateMaze(cols, rows, rng);
 
-  function clearArea(cx, cy, radius) {
-    for (let dc = -radius; dc <= radius; dc++) {
-      for (let dr = -radius; dr <= radius; dr++) {
-        const c = cx + dc, r = cy + dr;
-        if (c >= 0 && c < cols && r >= 0 && r < rows) wallMap[c][r] = false;
+  // Clear walls around spawn corners (radius in cells)
+  function clearSpawnArea(cx, cy, radius) {
+    const minC = Math.max(0, cx - radius);
+    const maxC = Math.min(cols - 1, cx + radius);
+    const minR = Math.max(0, cy - radius);
+    const maxR = Math.min(rows - 1, cy + radius);
+    for (let c = minC; c <= maxC; c++) {
+      for (let r = minR; r < maxR; r++) {
+        hWalls[c][r] = false;
+      }
+    }
+    for (let c = minC; c < maxC; c++) {
+      for (let r = minR; r <= maxR; r++) {
+        vWalls[c][r] = false;
       }
     }
   }
-  clearArea(2, 0, 2);
-  clearArea(cols - 3, 0, 2);
-  clearArea(1, rows - 1, 2);
-  clearArea(cols - 2, rows - 1, 2);
+  clearSpawnArea(2, 0, 2);
+  clearSpawnArea(cols - 3, 0, 2);
+  clearSpawnArea(1, rows - 1, 2);
+  clearSpawnArea(cols - 2, rows - 1, 2);
 
-  // Barriers between vertical spawn pairs
+  // Add horizontal barriers between vertical spawn pairs to prevent instant kills
   const midRow = Math.floor(rows / 2);
-  for (let c = 0; c < 5; c++) {
-    if (c < cols && midRow < rows) wallMap[c][midRow] = true;
+  for (let c = 0; c < 5 && c < cols; c++) {
+    if (midRow > 0 && midRow - 1 < rows - 1) hWalls[c][midRow - 1] = true;
+    if (midRow < rows - 1)                    hWalls[c][midRow] = true;
   }
-  for (let c = cols - 5; c < cols; c++) {
-    if (c >= 0 && midRow < rows) wallMap[c][midRow] = true;
-  }
-
-  // Carve corridors (skip barrier zones)
-  for (let c = 0; c < cols; c++) {
-    if (c < 5 || c >= cols - 5) continue;
-    if (wallMap[c][midRow] && rng.next() < 0.7) wallMap[c][midRow] = false;
-  }
-  for (let c = 10; c < cols; c += 12) {
-    for (let r = 0; r < rows; r++) {
-      if (wallMap[c][r] && rng.next() < 0.6) wallMap[c][r] = false;
-    }
+  for (let c = Math.max(0, cols - 5); c < cols; c++) {
+    if (midRow > 0 && midRow - 1 < rows - 1) hWalls[c][midRow - 1] = true;
+    if (midRow < rows - 1)                    hWalls[c][midRow] = true;
   }
 
-  const tanks = [
-    { id: 0, name: 'Alpha',   color: 'tank-green',  x: 2, y: 0,             dir: DIRECTIONS.RIGHT, alive: true, shootCD: 6, moveCD: 0, kills: 0 },
-    { id: 1, name: 'Bravo',   color: 'tank-blue',   x: cols - 3, y: 0,      dir: DIRECTIONS.LEFT,  alive: true, shootCD: 8, moveCD: 0, kills: 0 },
-    { id: 2, name: 'Charlie', color: 'tank-red',    x: 1, y: rows - 1,      dir: DIRECTIONS.RIGHT, alive: true, shootCD: 7, moveCD: 0, kills: 0 },
-    { id: 3, name: 'Delta',   color: 'tank-orange', x: cols - 2, y: rows - 1, dir: DIRECTIONS.LEFT,  alive: true, shootCD: 10, moveCD: 0, kills: 0 },
-  ];
+  // Snapshot the initial maze state for rendering (before bullets destroy walls)
+  const initialHWalls = hWalls.map(col => [...col]);
+  const initialVWalls = vWalls.map(col => [...col]);
 
-  const bullets = [];
-  let bulletIdCounter = 0;
-  const allBullets = [];
-  const explosions = [];
-  const wallEvents = [];
-  const muzzleFlashes = [];
-  const killEvents = [];      // { killerId, victimId, frame }
-  const frames = [];
+  // ── Edge-wall helpers ─────────────────────────────────────────────
 
-  function isOpen(c, r) {
-    return c >= 0 && c < cols && r >= 0 && r < rows && !wallMap[c][r];
+  function hasWallBetween(x1, y1, x2, y2) {
+    if (x2 === x1 + 1 && y2 === y1) return x1 < cols - 1 && vWalls[x1][y1];
+    if (x2 === x1 - 1 && y2 === y1) return x2 >= 0 && x2 < cols - 1 && vWalls[x2][y1];
+    if (y2 === y1 + 1 && x2 === x1) return y1 < rows - 1 && hWalls[x1][y1];
+    if (y2 === y1 - 1 && x2 === x1) return y2 >= 0 && y2 < rows - 1 && hWalls[x1][y2];
+    return true;
   }
-  function isWall(c, r) {
-    return c >= 0 && c < cols && r >= 0 && r < rows && wallMap[c][r];
+
+  function canMove(x, y, dir) {
+    const nx = x + dir.dx, ny = y + dir.dy;
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) return false;
+    return !hasWallBetween(x, y, nx, ny);
   }
+
+  function wallInDir(x, y, dir) {
+    const nx = x + dir.dx, ny = y + dir.dy;
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) return null;
+    if (!hasWallBetween(x, y, nx, ny)) return null;
+    // Return the wall identity for destruction
+    if (dir === DIRECTIONS.RIGHT) return { type: 'v', c: x, r: y };
+    if (dir === DIRECTIONS.LEFT)  return { type: 'v', c: x - 1, r: y };
+    if (dir === DIRECTIONS.DOWN)  return { type: 'h', c: x, r: y };
+    if (dir === DIRECTIONS.UP)    return { type: 'h', c: x, r: y - 1 };
+    return null;
+  }
+
+  function destroyWall(wallId) {
+    if (wallId.type === 'h') hWalls[wallId.c][wallId.r] = false;
+    else vWalls[wallId.c][wallId.r] = false;
+  }
+
   function tankAt(c, r, excludeId) {
     return tanks.find(t => t.alive && t.id !== excludeId && t.x === c && t.y === r);
   }
 
   function hasLineOfSight(x1, y1, x2, y2) {
     if (x1 === x2) {
-      const step = y2 > y1 ? 1 : -1;
-      for (let y = y1 + step; y !== y2; y += step) {
-        if (wallMap[x1][y]) return false;
+      const minY = Math.min(y1, y2);
+      const maxY = Math.max(y1, y2);
+      for (let y = minY; y < maxY; y++) {
+        if (hWalls[x1][y]) return false;
       }
       return true;
     }
     if (y1 === y2) {
-      const step = x2 > x1 ? 1 : -1;
-      for (let x = x1 + step; x !== x2; x += step) {
-        if (wallMap[x][y1]) return false;
+      const minX = Math.min(x1, x2);
+      const maxX = Math.max(x1, x2);
+      for (let x = minX; x < maxX; x++) {
+        if (vWalls[x][y1]) return false;
       }
       return true;
     }
@@ -146,7 +245,8 @@ function simulateGame(grid, options = {}) {
         const nx = cur.x + dir.dx, ny = cur.y + dir.dy;
         const key = `${nx},${ny}`;
         if (visited.has(key)) continue;
-        if (!isOpen(nx, ny) && !(nx === toX && ny === toY)) continue;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        if (hasWallBetween(cur.x, cur.y, nx, ny)) continue;
         if (tankAt(nx, ny, tankId) && !(nx === toX && ny === toY)) continue;
         visited.add(key);
         const fd = cur.firstDir || dir;
@@ -156,6 +256,24 @@ function simulateGame(grid, options = {}) {
     }
     return null;
   }
+
+  // ── Tanks ─────────────────────────────────────────────────────────
+
+  const tanks = [
+    { id: 0, name: 'Alpha',   color: 'tank-green',  x: 2, y: 0,             dir: DIRECTIONS.RIGHT, alive: true, shootCD: 6, moveCD: 0, kills: 0 },
+    { id: 1, name: 'Bravo',   color: 'tank-blue',   x: cols - 3, y: 0,      dir: DIRECTIONS.LEFT,  alive: true, shootCD: 8, moveCD: 0, kills: 0 },
+    { id: 2, name: 'Charlie', color: 'tank-red',    x: 1, y: rows - 1,      dir: DIRECTIONS.RIGHT, alive: true, shootCD: 7, moveCD: 0, kills: 0 },
+    { id: 3, name: 'Delta',   color: 'tank-orange', x: cols - 2, y: rows - 1, dir: DIRECTIONS.LEFT,  alive: true, shootCD: 10, moveCD: 0, kills: 0 },
+  ];
+
+  const bullets = [];
+  let bulletIdCounter = 0;
+  const allBullets = [];
+  const explosions = [];
+  const wallEvents = [];
+  const muzzleFlashes = [];
+  const killEvents = [];
+  const frames = [];
 
   function nearestEnemy(tank) {
     let best = null, bestDist = Infinity;
@@ -217,13 +335,12 @@ function simulateGame(grid, options = {}) {
       return;
     }
 
-    // Priority 2: Shoot blocking wall toward enemy (if no BFS path exists)
+    // Priority 2: Shoot blocking wall toward enemy (if no BFS path or wall on direct line)
     if (tank.shootCD <= 0) {
-      // First check if BFS can find a path at all
       const hasPath = bfsNextStep(tank.x, tank.y, enemy.x, enemy.y, tank.id);
 
       if (!hasPath) {
-        // No open path — shoot the nearest wall in enemy direction
+        // No open path — shoot the nearest edge wall toward enemy
         const edx = enemy.x - tank.x;
         const edy = enemy.y - tank.y;
         let primaryDirs = [];
@@ -234,16 +351,15 @@ function simulateGame(grid, options = {}) {
           if (edy !== 0) primaryDirs.push(edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP);
           if (edx !== 0) primaryDirs.push(edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT);
         }
-        // Also try all directions if primary ones don't have a wall
         for (const dir of [...primaryDirs, ...DIR_LIST]) {
-          const wx = tank.x + dir.dx, wy = tank.y + dir.dy;
-          if (isWall(wx, wy)) {
+          const w = wallInDir(tank.x, tank.y, dir);
+          if (w) {
             fireBullet(tank, dir, frameIndex);
             return;
           }
         }
       } else {
-        // Path exists but maybe a wall is between us on a cardinal line — shoot it for a shortcut
+        // Path exists — try to shortcut by shooting wall on cardinal line to enemy
         const edx = enemy.x - tank.x;
         const edy = enemy.y - tank.y;
         let cardinalDir = null;
@@ -251,8 +367,8 @@ function simulateGame(grid, options = {}) {
         else if (edy === 0 && edx !== 0) cardinalDir = edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT;
 
         if (cardinalDir) {
-          const wx = tank.x + cardinalDir.dx, wy = tank.y + cardinalDir.dy;
-          if (isWall(wx, wy)) {
+          const w = wallInDir(tank.x, tank.y, cardinalDir);
+          if (w) {
             fireBullet(tank, cardinalDir, frameIndex);
             return;
           }
@@ -268,15 +384,14 @@ function simulateGame(grid, options = {}) {
     // Priority 4: Random walk
     if (!moveDir) {
       const openDirs = DIR_LIST.filter(d => {
-        const nx = tank.x + d.dx, ny = tank.y + d.dy;
-        return isOpen(nx, ny) && !tankAt(nx, ny, tank.id);
+        return canMove(tank.x, tank.y, d) && !tankAt(tank.x + d.dx, tank.y + d.dy, tank.id);
       });
       if (openDirs.length > 0) moveDir = rng.pick(openDirs);
     }
 
     if (moveDir) {
       const nx = tank.x + moveDir.dx, ny = tank.y + moveDir.dy;
-      if (isOpen(nx, ny) && !tankAt(nx, ny, tank.id)) {
+      if (canMove(tank.x, tank.y, moveDir) && !tankAt(nx, ny, tank.id)) {
         tank.x = nx;
         tank.y = ny;
         tank.dir = moveDir;
@@ -293,18 +408,19 @@ function simulateGame(grid, options = {}) {
         const nx = bullet.x + bullet.dir.dx;
         const ny = bullet.y + bullet.dir.dy;
 
-        // DESPAWN: out of bounds
+        // DESPAWN: out of bounds (boundary wall)
         if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) {
           bullet.alive = false;
           bullet.deathFrame = frameIndex;
           break;
         }
 
-        // DESPAWN: hit wall → destroy wall instantly
-        if (wallMap[nx][ny]) {
-          wallMap[nx][ny] = false;    // wall destroyed in one shot
-          wallEvents.push({ col: nx, row: ny, frame: frameIndex });
-          explosions.push({ x: nx, y: ny, frame: frameIndex, type: 'wall' });
+        // DESPAWN: hit edge wall → destroy wall instantly
+        const w = wallInDir(bullet.x, bullet.y, bullet.dir);
+        if (w) {
+          destroyWall(w);
+          wallEvents.push({ type: w.type, col: w.c, row: w.r, frame: frameIndex });
+          explosions.push({ x: bullet.x, y: bullet.y, frame: frameIndex, type: 'wall', wallDir: bullet.dir });
           bullet.alive = false;
           bullet.deathFrame = frameIndex;
           break;
@@ -373,7 +489,18 @@ function simulateGame(grid, options = {}) {
   const initialGrid = grid.map(col => col.map(cell => ({ ...cell })));
   const aliveFinal = tanks.filter(t => t.alive);
   const winner = aliveFinal.length === 1 ? aliveFinal[0] : null;
-  return { frames, allBullets, explosions, wallEvents, muzzleFlashes, killEvents, tanks, winner, grid, cols, rows, wallMap, initialGrid };
+
+  // Count maze walls for stats
+  let mazeWallCount = 0;
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows - 1; r++) if (initialHWalls[c][r]) mazeWallCount++;
+  for (let c = 0; c < cols - 1; c++) for (let r = 0; r < rows; r++) if (initialVWalls[c][r]) mazeWallCount++;
+
+  return {
+    frames, allBullets, explosions, wallEvents, muzzleFlashes, killEvents,
+    tanks, winner, grid, cols, rows, initialGrid,
+    maze: { hWalls, vWalls, initialHWalls, initialVWalls },
+    mazeWallCount,
+  };
 }
 
 module.exports = { simulateGame, DIRECTIONS };

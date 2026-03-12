@@ -2,10 +2,8 @@
  * svg-renderer.js
  * Converts game recording → animated SVG with smooth SMIL animations.
  *
- * Key smoothness fixes:
- *   - Rotation: continuous angles that always take the shortest arc
- *   - Position: calcMode="spline" with ease curves for gliding
- *   - Bullets: clean spawn/despawn with tight opacity windows
+ * Activity cells are rendered as background only (contribution colors).
+ * Maze walls are drawn as thin lines in the gaps between cells.
  */
 
 const { themes } = require('./themes');
@@ -26,10 +24,6 @@ function cellCenter(col, row) {
   };
 }
 
-/**
- * Normalize angle delta to shortest arc (-180..180].
- * Returns the target angle adjusted to be within half-turn of current.
- */
 function shortestArc(current, target) {
   let diff = target - current;
   while (diff > 180) diff -= 360;
@@ -40,9 +34,8 @@ function shortestArc(current, target) {
 function renderSVG(gameResult, themeName = 'light') {
   const theme = themes[themeName] || themes.light;
   const { frames, allBullets, explosions, wallEvents, muzzleFlashes,
-          tanks, grid, cols, rows, initialGrid } = gameResult;
+          tanks, grid, cols, rows, initialGrid, maze } = gameResult;
 
-  // Determine the winner (if any)
   const aliveTanks = tanks.filter(t => t.alive);
   const winner = aliveTanks.length === 1 ? aliveTanks[0] : null;
 
@@ -64,12 +57,12 @@ function renderSVG(gameResult, themeName = 'light') {
 
   function tankAnimationData(tankId) {
     const rawPos = [];
-    const rawAngle = [];  // continuous (unwrapped) angles
+    const rawAngle = [];
     const rawOp = [];
     let died = false;
     let deathFrame = totalFrames;
 
-    let runningAngle = null;  // accumulator for shortest-arc rotation
+    let runningAngle = null;
 
     for (let f = 0; f < totalFrames; f++) {
       const t = frames[f].tanks.find(t => t.id === tankId);
@@ -78,7 +71,6 @@ function renderSVG(gameResult, themeName = 'light') {
       const c = cellCenter(t.x, t.y);
       rawPos.push({ x: c.x, y: c.y });
 
-      // Continuous rotation: always take shortest arc
       const nominalAngle = t.dir.angle;
       if (runningAngle === null) {
         runningAngle = nominalAngle;
@@ -91,7 +83,6 @@ function renderSVG(gameResult, themeName = 'light') {
       rawOp.push(t.alive ? 1 : 0);
     }
 
-    // ── Position keyframes with spline easing ──
     const posKF = [];
     const posSplines = [];
 
@@ -100,19 +91,16 @@ function renderSVG(gameResult, themeName = 'light') {
     for (let i = 1; i < rawPos.length; i++) {
       const moved = (rawPos[i].x !== rawPos[i - 1].x || rawPos[i].y !== rawPos[i - 1].y);
       if (moved) {
-        // Anchor: hold previous position right before the move
         const anchorTime = ft(i - 1);
         if (posKF[posKF.length - 1].time !== anchorTime) {
           posKF.push({ pos: `${rawPos[i - 1].x},${rawPos[i - 1].y}`, time: anchorTime });
           posSplines.push(LINEAR);
         }
-        // Glide to new position
         posKF.push({ pos: `${rawPos[i].x},${rawPos[i].y}`, time: ft(i) });
         posSplines.push(EASE);
       }
     }
 
-    // Close out
     const lastPos = rawPos[rawPos.length - 1];
     const lastTime = ft(rawPos.length - 1);
     if (posKF[posKF.length - 1].time !== lastTime) {
@@ -120,7 +108,6 @@ function renderSVG(gameResult, themeName = 'light') {
       posSplines.push(LINEAR);
     }
 
-    // ── Rotation keyframes (smooth short-arc turns) ──
     const rotKF = [];
     const rotSplines = [];
 
@@ -128,13 +115,11 @@ function renderSVG(gameResult, themeName = 'light') {
 
     for (let i = 1; i < rawAngle.length; i++) {
       if (rawAngle[i] !== rawAngle[i - 1]) {
-        // Hold previous angle until 1 frame before the turn
         const holdTime = ft(i - 1);
         if (rotKF[rotKF.length - 1].time !== holdTime) {
           rotKF.push({ val: rawAngle[i - 1], time: holdTime });
           rotSplines.push(LINEAR);
         }
-        // Smooth turn over 1 frame
         rotKF.push({ val: rawAngle[i], time: ft(i) });
         rotSplines.push(EASE);
       }
@@ -146,7 +131,6 @@ function renderSVG(gameResult, themeName = 'light') {
       rotSplines.push(LINEAR);
     }
 
-    // ── Opacity keyframes ──
     const opKF = [];
     opKF.push({ val: rawOp[0], time: ft(0) });
     for (let i = 1; i < rawOp.length; i++) {
@@ -197,38 +181,73 @@ function renderSVG(gameResult, themeName = 'light') {
   svg += `  .score-stat { font: 9px monospace; }\n`;
   svg += `  .tank-body { stroke: ${theme.background}; stroke-width: 0.5; }\n`;
   svg += `  .turret { stroke-width: 2.5; stroke-linecap: round; }\n`;
+  svg += `  .maze-wall { stroke: ${theme.mazeWall}; stroke-width: 1.5; stroke-linecap: round; }\n`;
   svg += `</style>\n`;
 
   // ── Background ──
   svg += `<rect class="bg" width="${svgWidth}" height="${svgHeight}" />\n`;
 
-  // ── Grid: ground + walls ──
+  // ── Grid: contribution cells as background only ──
   svg += `<g id="grid">\n`;
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows; r++) {
       const x = GRID_LEFT + c * CELL_PITCH;
       const y = GRID_TOP + r * CELL_PITCH;
-      svg += `  <rect class="grid-cell" x="${x}" y="${y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="${theme.gridBackground}" />\n`;
+      const level = initialGrid[c][r].level;
+      const fill = level > 0 ? theme.wallColors[level] : theme.gridBackground;
+      svg += `  <rect class="grid-cell" x="${x}" y="${y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="${fill}" />\n`;
     }
   }
+  svg += `</g>\n`;
+
+  // ── Maze walls: thin lines in the gaps between cells ──
+  svg += `<g id="maze-walls">\n`;
+
+  // Border rectangle around the entire grid
+  const borderX = GRID_LEFT - 1.5;
+  const borderY = GRID_TOP - 1.5;
+  const borderW = cols * CELL_PITCH - CELL_GAP + 3;
+  const borderH = rows * CELL_PITCH - CELL_GAP + 3;
+  svg += `  <rect x="${borderX}" y="${borderY}" width="${borderW}" height="${borderH}" fill="none" stroke="${theme.mazeBorder}" stroke-width="1.5" rx="1" />\n`;
+
+  // Horizontal walls (between rows)
   for (let c = 0; c < cols; c++) {
-    for (let r = 0; r < rows; r++) {
-      const level = initialGrid[c][r].level;
-      if (level === 0) continue;
-      const x = GRID_LEFT + c * CELL_PITCH;
-      const y = GRID_TOP + r * CELL_PITCH;
-      const fill = theme.wallColors[level];
-      const destruction = wallEvents.find(e => e.col === c && e.row === r);
-      svg += `  <rect class="grid-cell" x="${x}" y="${y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="${fill}"`;
+    for (let r = 0; r < rows - 1; r++) {
+      if (!maze.initialHWalls[c][r]) continue;
+      const y = GRID_TOP + r * CELL_PITCH + CELL_SIZE + CELL_GAP / 2;
+      const x1 = GRID_LEFT + c * CELL_PITCH - 1;
+      const x2 = GRID_LEFT + c * CELL_PITCH + CELL_SIZE + 1;
+      const destruction = wallEvents.find(e => e.type === 'h' && e.col === c && e.row === r);
       if (destruction) {
         const preT = ft(Math.max(0, destruction.frame - 1));
         const destT = ft(destruction.frame);
         const fadeT = ft(Math.min(destruction.frame + 4, totalFrames - 1));
-        svg += `>\n`;
+        svg += `  <line class="maze-wall" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}">\n`;
         svg += `    <animate attributeName="opacity" values="1;1;0.3;0" keyTimes="0;${preT};${destT};${fadeT}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
-        svg += `  </rect>\n`;
+        svg += `  </line>\n`;
       } else {
-        svg += ` />\n`;
+        svg += `  <line class="maze-wall" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" />\n`;
+      }
+    }
+  }
+
+  // Vertical walls (between columns)
+  for (let c = 0; c < cols - 1; c++) {
+    for (let r = 0; r < rows; r++) {
+      if (!maze.initialVWalls[c][r]) continue;
+      const x = GRID_LEFT + c * CELL_PITCH + CELL_SIZE + CELL_GAP / 2;
+      const y1 = GRID_TOP + r * CELL_PITCH - 1;
+      const y2 = GRID_TOP + r * CELL_PITCH + CELL_SIZE + 1;
+      const destruction = wallEvents.find(e => e.type === 'v' && e.col === c && e.row === r);
+      if (destruction) {
+        const preT = ft(Math.max(0, destruction.frame - 1));
+        const destT = ft(destruction.frame);
+        const fadeT = ft(Math.min(destruction.frame + 4, totalFrames - 1));
+        svg += `  <line class="maze-wall" x1="${x}" y1="${y1}" x2="${x}" y2="${y2}">\n`;
+        svg += `    <animate attributeName="opacity" values="1;1;0.3;0" keyTimes="0;${preT};${destT};${fadeT}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `  </line>\n`;
+      } else {
+        svg += `  <line class="maze-wall" x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" />\n`;
       }
     }
   }
@@ -299,7 +318,7 @@ function renderSVG(gameResult, themeName = 'light') {
   }
   svg += `</g>\n`;
 
-  // ── Bullets: tight spawn/despawn opacity ──
+  // ── Bullets ──
   svg += `<g id="bullets">\n`;
   for (const bullet of allBullets) {
     if (bullet.path.length < 1) continue;
@@ -308,7 +327,6 @@ function renderSVG(gameResult, themeName = 'light') {
     const ownerTank = tanks.find(t => t.id === bullet.ownerId);
     const bulletColor = ownerTank ? theme.tanks[ownerTank.color].body : theme.bullet;
 
-    // Position keyframes
     const posValues = [];
     const timeKeys = [];
 
@@ -327,18 +345,15 @@ function renderSVG(gameResult, themeName = 'light') {
     posValues.push(`${lastC.x},${lastC.y}`);
     timeKeys.push('1');
 
-    // Opacity: visible ONLY during flight, hidden before and after
     const vPre = ft(Math.max(0, spawnFrame - 1));
     const vOn = ft(spawnFrame);
     const vOff = ft(deathFrame);
     const vGone = ft(Math.min(deathFrame + 1, totalFrames - 1));
 
-    // Glow
     svg += `  <circle r="${BULLET_R + 1.5}" fill="${bulletColor}" opacity="0">\n`;
     svg += `    <animate attributeName="opacity" values="0;0;0.3;0.3;0;0" keyTimes="0;${vPre};${vOn};${vOff};${vGone};1" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
     svg += `    <animateTransform attributeName="transform" type="translate" values="${posValues.join(';')}" keyTimes="${timeKeys.join(';')}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
     svg += `  </circle>\n`;
-    // Core
     svg += `  <circle r="${BULLET_R}" fill="${bulletColor}" opacity="0">\n`;
     svg += `    <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;${vPre};${vOn};${vOff};${vGone};1" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
     svg += `    <animateTransform attributeName="transform" type="translate" values="${posValues.join(';')}" keyTimes="${timeKeys.join(';')}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
@@ -346,7 +361,7 @@ function renderSVG(gameResult, themeName = 'light') {
   }
   svg += `</g>\n`;
 
-  // ── Tanks (spline position + spline rotation for smooth turns) ──
+  // ── Tanks ──
   svg += `<g id="tanks">\n`;
   for (const tank of tanks) {
     const tankTheme = theme.tanks[tank.color];
@@ -355,17 +370,14 @@ function renderSVG(gameResult, themeName = 'light') {
 
     svg += `  <g opacity="1">\n`;
 
-    // Opacity
     svg += `    <animate attributeName="opacity" values="${anim.opValues}" keyTimes="${anim.opKeyTimes}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
 
-    // Position (spline-eased gliding)
     if (anim.posCount > 1 && anim.posKeySplines) {
       svg += `    <animateTransform attributeName="transform" type="translate" values="${anim.posValues}" keyTimes="${anim.posKeyTimes}" calcMode="spline" keySplines="${anim.posKeySplines}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
     } else {
       svg += `    <animateTransform attributeName="transform" type="translate" values="${anim.posValues}" keyTimes="${anim.posKeyTimes}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
     }
 
-    // Inner group for rotation (spline-eased smooth turning)
     svg += `    <g>\n`;
     if (anim.rotCount > 1 && anim.rotKeySplines) {
       svg += `      <animateTransform attributeName="transform" type="rotate" values="${anim.rotValues}" keyTimes="${anim.rotKeyTimes}" calcMode="spline" keySplines="${anim.rotKeySplines}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
@@ -373,7 +385,6 @@ function renderSVG(gameResult, themeName = 'light') {
       svg += `      <animateTransform attributeName="transform" type="rotate" values="${anim.rotValues}" keyTimes="${anim.rotKeyTimes}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
     }
 
-    // Tank body
     svg += `      <rect class="tank-body" x="${-half}" y="${-half}" width="${TANK_SIZE}" height="${TANK_SIZE}" rx="1.5" ry="1.5" fill="${tankTheme.body}" />\n`;
     svg += `      <rect x="${-half - 1}" y="${-half + 1}" width="2" height="${TANK_SIZE - 2}" rx="0.5" fill="${tankTheme.track}" />\n`;
     svg += `      <rect x="${half - 1}" y="${-half + 1}" width="2" height="${TANK_SIZE - 2}" rx="0.5" fill="${tankTheme.track}" />\n`;
@@ -386,7 +397,6 @@ function renderSVG(gameResult, themeName = 'light') {
   svg += `</g>\n`;
 
   // ── Scoreboard ──
-  // Layout: [color-dot] Name  💥N  [💀 on death | 🏆 on win]
   const scoreY = GRID_TOP + rows * CELL_PITCH + 10;
   svg += `<g id="scoreboard">\n`;
 
@@ -396,20 +406,16 @@ function renderSVG(gameResult, themeName = 'light') {
     const tankTheme = theme.tanks[tank.color];
     const isWinner = winner && winner.id === tank.id;
 
-    // Color dot
     svg += `  <rect x="${scoreX}" y="${scoreY}" width="8" height="8" rx="1" fill="${tankTheme.body}" />\n`;
 
-    // Tank name (winner gets trophy prefix)
     if (isWinner) {
       svg += `  <text class="score-name" x="${scoreX + 11}" y="${scoreY + 7}" fill="${theme.text}">\u{1F3C6} ${tankTheme.label}</text>\n`;
     } else {
       svg += `  <text class="score-name" x="${scoreX + 11}" y="${scoreY + 7}" fill="${theme.text}">${tankTheme.label}</text>\n`;
     }
 
-    // Kill count (static final)
     svg += `  <text class="score-stat" x="${scoreX + 11}" y="${scoreY + 18}" fill="${theme.textMuted}">\u{1F4A5}${tank.kills}</text>\n`;
 
-    // 💀 on death (animated: appears at deathFrame)
     if (tank.deathFrame != null) {
       const dtPre = ft(Math.max(0, tank.deathFrame - 1));
       const dtAt = ft(tank.deathFrame);
@@ -419,7 +425,6 @@ function renderSVG(gameResult, themeName = 'light') {
       svg += `  </text>\n`;
     }
 
-    // 👑 crown above winner (animated: appears when last rival dies)
     if (isWinner) {
       const deathFrames = tanks.filter(t => t.id !== tank.id && t.deathFrame != null).map(t => t.deathFrame);
       if (deathFrames.length > 0) {
@@ -436,7 +441,6 @@ function renderSVG(gameResult, themeName = 'light') {
     scoreX += 90;
   }
 
-  // Attribution
   svg += `  <text class="sub-text" x="${svgWidth - 24}" y="${scoreY + 17}" text-anchor="end" fill="${theme.textMuted}">Kahooty/gitTanks</text>\n`;
   svg += `</g>\n`;
 

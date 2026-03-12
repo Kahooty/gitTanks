@@ -92,16 +92,14 @@ async function main() {
   }
 
   // --- Grid stats ---
-  let wallCount = 0;
-  let emptyCount = 0;
+  let activityCount = 0;
   for (const col of grid) {
     for (const cell of col) {
-      if (cell.level > 0) wallCount++;
-      else emptyCount++;
+      if (cell.level > 0) activityCount++;
     }
   }
   console.log(`\n🗺️  Battlefield: ${grid.length}×${grid[0].length} grid`);
-  console.log(`   🧱 Walls (activity): ${wallCount}  |  ⬜ Open: ${emptyCount}`);
+  console.log(`   📊 Activity cells: ${activityCount}  (background only)`);
   console.log(`   🎲 Seed: ${seed}`);
 
   // --- Run simulation ---
@@ -112,6 +110,7 @@ async function main() {
   const winner = aliveTanks.length === 1 ? aliveTanks[0] : null;
 
   console.log(`   📊 Frames: ${gameResult.frames.length}`);
+  console.log(`   🧱 Maze walls: ${gameResult.mazeWallCount}`);
   console.log(`   💥 Explosions: ${gameResult.explosions.length}`);
   console.log(`   🧱 Walls destroyed: ${gameResult.wallEvents.length}`);
   console.log(`   🎯 Bullets fired: ${gameResult.allBullets.length}`);

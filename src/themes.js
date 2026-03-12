@@ -12,14 +12,18 @@ const themes = {
     text: '#1f2328',
     textMuted: '#656d76',
 
-    // Contribution wall colors (matching GitHub's green scheme)
+    // Contribution cell colors (background only — matching GitHub's green scheme)
     wallColors: {
-      0: 'transparent',     // open ground - not rendered
-      1: '#9be9a8',         // light green
-      2: '#40c463',         // medium green
-      3: '#30a14e',         // dark green
-      4: '#216e39',         // very dark green
+      0: 'transparent',
+      1: '#9be9a8',
+      2: '#40c463',
+      3: '#30a14e',
+      4: '#216e39',
     },
+
+    // Maze wall line color (drawn in gaps between cells)
+    mazeWall: '#9ba3ad',
+    mazeBorder: '#b0b8c1',
 
     // Tank colors
     tanks: {
@@ -36,7 +40,6 @@ const themes = {
     wallDamage: '#fecaca',
     groundMark: '#d1d5db',
 
-    // HUD / scoreboard
     hudBg: 'rgba(255,255,255,0.9)',
     hudBorder: '#d0d7de',
   },
@@ -49,7 +52,7 @@ const themes = {
     text: '#f0f6fc',
     textMuted: '#8b949e',
 
-    // Contribution wall colors (GitHub dark theme greens)
+    // Contribution cell colors (background only — GitHub dark greens)
     wallColors: {
       0: 'transparent',
       1: '#0e4429',
@@ -57,6 +60,10 @@ const themes = {
       3: '#26a641',
       4: '#39d353',
     },
+
+    // Maze wall line color
+    mazeWall: '#484f58',
+    mazeBorder: '#3d444d',
 
     // Tank colors (brighter for dark bg)
     tanks: {
