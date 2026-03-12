@@ -34,6 +34,8 @@ class RNG {
 }
 
 const EXTRA_WALL_REMOVAL_RATE = 0.40;
+const CORRIDOR_CLEAR_RATE = 0.70;
+const CONNECTOR_CLEAR_RATE = 0.80;
 
 /**
  * Generate a maze on the grid using edge walls (walls between cells).
@@ -129,7 +131,7 @@ function generateMaze(cols, rows, rng) {
 
   for (const cr of hCorridorRows) {
     for (let c = 0; c < cols - 1; c++) {
-      if (rng.next() < 0.7) vWalls[c][cr] = false;
+      if (rng.next() < CORRIDOR_CLEAR_RATE) vWalls[c][cr] = false;
     }
   }
 
@@ -139,7 +141,7 @@ function generateMaze(cols, rows, rng) {
     const vc = i * vSpacing;
     if (vc < cols) {
       for (let r = 0; r < rows - 1; r++) {
-        if (rng.next() < 0.8) hWalls[vc][r] = false;
+        if (rng.next() < CONNECTOR_CLEAR_RATE) hWalls[vc][r] = false;
       }
     }
   }
@@ -544,7 +546,7 @@ function simulateGame(grid, options = {}) {
         tank.y += cd.dy;
         tank.dir = cd;
         tank.moveCD = moveCooldownAfterMove;
-        if (!wallInDir(tank.x, tank.y, cd)) tank.clearDir = null;
+        tank.clearDir = null;
         return;
       }
       tank.clearDir = null;
