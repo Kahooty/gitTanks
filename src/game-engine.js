@@ -33,7 +33,9 @@ class RNG {
   }
 }
 
-const EXTRA_WALL_REMOVAL_RATE = 0.30;
+const EXTRA_WALL_REMOVAL_RATE = 0.40;
+const CORRIDOR_CLEAR_RATE = 0.70;
+const CONNECTOR_CLEAR_RATE = 0.80;
 
 /**
  * Generate a maze on the grid using edge walls (walls between cells).
@@ -119,6 +121,56 @@ function generateMaze(cols, rows, rng) {
     const w = shuffled[i];
     if (w.type === 'h') hWalls[w.c][w.r] = false;
     else vWalls[w.c][w.r] = false;
+  }
+
+  // ── Structured corridors and arenas for better gameplay layout ──
+
+  // Horizontal lanes: clear vertical walls along key rows so tanks can traverse
+  const hCorridorRows = [1, Math.floor(rows / 2)];
+  if (rows > 5) hCorridorRows.push(rows - 2);
+
+  for (const cr of hCorridorRows) {
+    for (let c = 0; c < cols - 1; c++) {
+      if (rng.next() < CORRIDOR_CLEAR_RATE) vWalls[c][cr] = false;
+    }
+  }
+
+  // Vertical connectors: clear horizontal walls at regular intervals for lane-switching
+  const vSpacing = Math.max(8, Math.floor(cols / 5));
+  for (let i = 1; i * vSpacing < cols; i++) {
+    const vc = i * vSpacing;
+    if (vc < cols) {
+      for (let r = 0; r < rows - 1; r++) {
+        if (rng.next() < CONNECTOR_CLEAR_RATE) hWalls[vc][r] = false;
+      }
+    }
+  }
+
+  // Open areas at corridor intersections for combat arenas
+  for (let i = 1; i * vSpacing < cols; i++) {
+    const vc = i * vSpacing;
+    for (const cr of hCorridorRows) {
+      for (let dc = -1; dc <= 1; dc++) {
+        for (let dr = -1; dr <= 1; dr++) {
+          const c = vc + dc;
+          const r = cr + dr;
+          if (c >= 0 && c < cols && r >= 0 && r < rows - 1) hWalls[c][r] = false;
+          if (c >= 0 && c < cols - 1 && r >= 0 && r < rows) vWalls[c][r] = false;
+        }
+      }
+    }
+  }
+
+  // Center arena: larger open area at the map center
+  const centerC = Math.floor(cols / 2);
+  const centerR = Math.floor(rows / 2);
+  for (let dc = -2; dc <= 2; dc++) {
+    for (let dr = -1; dr <= 1; dr++) {
+      const c = centerC + dc;
+      const r = centerR + dr;
+      if (c >= 0 && c < cols && r >= 0 && r < rows - 1) hWalls[c][r] = false;
+      if (c >= 0 && c < cols - 1 && r >= 0 && r < rows) vWalls[c][r] = false;
+    }
   }
 
   return { hWalls, vWalls };
@@ -246,7 +298,7 @@ function simulateGame(grid, options = {}) {
     const visited = new Set([`${fromX},${fromY}`]);
     const queue = [{ x: fromX, y: fromY, firstDir: null }];
     let itr = 0;
-    while (queue.length > 0 && itr < 800) {
+    while (queue.length > 0 && itr < 1200) {
       itr++;
       const cur = queue.shift();
       for (const dir of DIR_LIST) {
@@ -276,7 +328,7 @@ function simulateGame(grid, options = {}) {
     const queue = [{ x: fromX, y: fromY, firstDir: null }];
     const candidates = [];
     let itr = 0;
-    while (queue.length > 0 && itr < 800) {
+    while (queue.length > 0 && itr < 1200) {
       itr++;
       const cur = queue.shift();
       for (const dir of DIR_LIST) {
@@ -354,10 +406,10 @@ function simulateGame(grid, options = {}) {
   // ── Tanks ─────────────────────────────────────────────────────────
 
   const tanks = [
-    { id: 0, name: 'Alpha',   color: 'tank-green',  x: 2, y: 0,             dir: DIRECTIONS.RIGHT, alive: true, shootCD: 6, moveCD: 0, kills: 0 },
-    { id: 1, name: 'Bravo',   color: 'tank-blue',   x: cols - 3, y: 0,      dir: DIRECTIONS.LEFT,  alive: true, shootCD: 8, moveCD: 0, kills: 0 },
-    { id: 2, name: 'Charlie', color: 'tank-red',    x: 1, y: rows - 1,      dir: DIRECTIONS.RIGHT, alive: true, shootCD: 7, moveCD: 0, kills: 0 },
-    { id: 3, name: 'Delta',   color: 'tank-orange', x: cols - 2, y: rows - 1, dir: DIRECTIONS.LEFT,  alive: true, shootCD: 10, moveCD: 0, kills: 0 },
+    { id: 0, name: 'Alpha',   color: 'tank-green',  x: 2, y: 0,             dir: DIRECTIONS.RIGHT, alive: true, shootCD: 6, moveCD: 0, kills: 0, clearDir: null },
+    { id: 1, name: 'Bravo',   color: 'tank-blue',   x: cols - 3, y: 0,      dir: DIRECTIONS.LEFT,  alive: true, shootCD: 8, moveCD: 0, kills: 0, clearDir: null },
+    { id: 2, name: 'Charlie', color: 'tank-red',    x: 1, y: rows - 1,      dir: DIRECTIONS.RIGHT, alive: true, shootCD: 7, moveCD: 0, kills: 0, clearDir: null },
+    { id: 3, name: 'Delta',   color: 'tank-orange', x: cols - 2, y: rows - 1, dir: DIRECTIONS.LEFT,  alive: true, shootCD: 10, moveCD: 0, kills: 0, clearDir: null },
   ];
 
   const bullets = [];
@@ -486,6 +538,20 @@ function simulateGame(grid, options = {}) {
       }
     }
 
+    // Priority 2.7: Follow through after wall clearing - advance through destroyed wall
+    if (tank.moveCD <= 0 && tank.clearDir) {
+      const cd = tank.clearDir;
+      if (canMove(tank.x, tank.y, cd) && !tankAt(tank.x + cd.dx, tank.y + cd.dy, tank.id)) {
+        tank.x += cd.dx;
+        tank.y += cd.dy;
+        tank.dir = cd;
+        tank.moveCD = moveCooldownAfterMove;
+        tank.clearDir = null;
+        return;
+      }
+      tank.clearDir = null;
+    }
+
     // Priority 3: Shoot wall on cardinal line to enemy to create line of sight
     if (tank.shootCD <= 0) {
       const edx = enemy.x - tank.x;
@@ -497,6 +563,7 @@ function simulateGame(grid, options = {}) {
       if (cardinalDir) {
         const w = wallInDir(tank.x, tank.y, cardinalDir);
         if (w) {
+          tank.clearDir = cardinalDir;
           fireBullet(tank, cardinalDir, frameIndex);
           return;
         }
@@ -534,6 +601,7 @@ function simulateGame(grid, options = {}) {
       for (const dir of [...primaryDirs, ...DIR_LIST]) {
         const w = wallInDir(tank.x, tank.y, dir);
         if (w) {
+          tank.clearDir = dir;
           fireBullet(tank, dir, frameIndex);
           return;
         }
@@ -674,6 +742,7 @@ function simulateGame(grid, options = {}) {
         tanks[i].shootCD = tankStartPositions[i].shootCD;
         tanks[i].moveCD = 0;
         tanks[i].deathFrame = undefined;
+        tanks[i].clearDir = null;
       }
 
       // Clear active bullets
