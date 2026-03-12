@@ -1,36 +1,26 @@
 # 🎯 gitTanks
 
-Git contribution graph activity stylized as a retro-style tanks game.
-
-Four tanks spawn in the corners of your contribution grid — your real commit history forms the walls and cover. Tanks navigate, blast through obstacles, and eliminate each other in a fully automated animated SVG that updates daily.
+Animated tank battle on your GitHub contribution graph — generated daily as an SVG.
 
 > Inspired by [pacman-contribution-graph](https://github.com/abozanona/pacman-contribution-graph) and [snk](https://github.com/Platane/snk)
 
----
-
 ## How It Works
 
-Your GitHub contribution data becomes the battlefield. Every day with activity is a wall; empty days are open ground. One shot destroys any wall. The game uses a date-based seed so each day generates a unique battle from your real activity.
+A **randomly generated maze** of thin walls is drawn in the gaps between contribution cells. Four tanks spawn in the corners, navigate the maze, blast through walls, and fight to be the last one standing.
 
-| Contribution Level | In-Game |
-|---|---|
-| **NONE** | Open ground |
-| **FIRST_QUARTILE** | Wall (1 shot) |
-| **SECOND_QUARTILE** | Wall (1 shot) |
-| **THIRD_QUARTILE** | Wall (1 shot) |
-| **FOURTH_QUARTILE** | Wall (1 shot) |
+- **Contribution cells** → background color only (green shades reflect your activity)
+- **Maze walls** → light outline lines between cells, randomly generated each day via a seeded algorithm (DFS + extra openings)
+- **Date-based seed** → same day = same battle; new day = new maze
 
----
+## Setup
 
-## Quick Setup
+### 1. Profile repo
 
-### 1. Create your profile repo
+Create a repository matching your GitHub username (e.g. `Kahooty/Kahooty`).
 
-Create a repository with your exact GitHub username (e.g. `Kahooty/Kahooty`).
+### 2. Workflow
 
-### 2. Add the workflow
-
-Create `.github/workflows/tank-battle.yml`:
+`.github/workflows/tank-battle.yml`:
 
 ```yaml
 name: Generate Tank Battle
@@ -40,8 +30,7 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   generate:
@@ -49,9 +38,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
-      - name: Generate tank-contribution-graph.svg
+      - name: Generate SVGs
         uses: Kahooty/gitTanks@main
         with:
           github_user_name: ${{ github.repository_owner }}
@@ -65,78 +53,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### 3. Add to your README
+### 3. Embed in README
 
 ```html
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Kahooty/Kahooty/output/tank-contribution-graph-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Kahooty/Kahooty/output/tank-contribution-graph.svg">
-  <img alt="tank battle contribution graph" src="https://raw.githubusercontent.com/Kahooty/Kahooty/output/tank-contribution-graph.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/<user>/<user>/output/tank-contribution-graph-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/<user>/<user>/output/tank-contribution-graph.svg">
+  <img alt="tank battle contribution graph" src="https://raw.githubusercontent.com/<user>/<user>/output/tank-contribution-graph.svg">
 </picture>
 ```
 
-Replace `Kahooty` with your GitHub username.
+Replace `<user>` with your GitHub username.
 
-### 4. Trigger it
+## Local Dev
 
-Push to main, or go to **Actions** → **Generate Tank Battle** → **Run workflow**.
+```bash
+node index.js --sample              # sample data, no token needed
+node index.js --sample --seed 999   # reproducible seed
+node index.js --username <user> --token <ghp_token>
+```
 
----
+Output → `dist/tank-contribution-graph.svg` and `dist/tank-contribution-graph-dark.svg`
 
 ## Scoreboard
 
-The animated scoreboard tracks each tank:
-
-- **💥N** — kill count per tank
-- **💀** — appears on a tank's icon the frame it's destroyed
-- **🏆** — prefixed to the winning tank's name
-- **👑** — animated crown above the last tank standing
-
----
-
-## Local Development
-
-```bash
-git clone https://github.com/Kahooty/gitTanks.git
-cd gitTanks
-
-# Test with sample data (no token needed)
-node index.js --sample
-
-# Generate with real GitHub data
-node index.js --username Kahooty --token ghp_your_token_here
-
-# Force a specific seed (same seed = same game)
-node index.js --sample --seed 999
-```
-
-Output: `dist/tank-contribution-graph.svg` and `dist/tank-contribution-graph-dark.svg`
-
----
-
-## Project Structure
-
-```
-gitTanks/
-├── action.yml                 # GitHub Action definition
-├── index.js                   # CLI entry point
-├── package.json
-├── src/
-│   ├── fetch-contributions.js # GitHub GraphQL API — fetches real activity
-│   ├── game-engine.js         # Tank battle simulation
-│   ├── svg-renderer.js        # Animated SVG output
-│   └── themes.js              # Light / dark color themes
-├── .github/workflows/
-│   └── main.yml               # Example workflow
-└── README.md
-```
-
----
+| Symbol | Meaning |
+|--------|---------|
+| 💥N | Kill count |
+| 💀 | Destroyed (appears on death) |
+| 🏆 | Winner prefix |
+| 👑 | Crown (animated on victory) |
 
 ## License
 
 MIT
-
----
-
-_generated with [Kahooty/gitTanks](https://github.com/Kahooty/gitTanks)_

@@ -34,12 +34,8 @@ query($username: String!) {
 `;
 
 /**
- * Contribution levels map to wall strength:
- *   NONE           → 0 (open ground)
- *   FIRST_QUARTILE → 1 (light cover)
- *   SECOND_QUARTILE→ 2 (medium cover)
- *   THIRD_QUARTILE → 3 (heavy cover)
- *   FOURTH_QUARTILE→ 4 (fortified wall)
+ * Contribution levels determine cell background color (visual only).
+ * Maze walls are generated separately — activity data does not affect gameplay.
  */
 const LEVEL_MAP = {
   'NONE': 0,
