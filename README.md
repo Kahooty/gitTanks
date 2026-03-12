@@ -84,6 +84,11 @@ Output → `dist/tank-contribution-graph.svg` and `dist/tank-contribution-graph-
 | 🏆 | Winner prefix |
 | 👑 | Crown (animated on victory) |
 
+## Known Issues
+
+- **Wall destruction path-clearing**: Tanks may not always efficiently follow through after destroying a wall to clear a path. The simulation correctly removes destroyed walls from the map, but tank AI may occasionally prioritize other actions (evading, strafing) before advancing through a cleared gap.
+- **Maze generation variability**: Randomly generated mazes can sometimes produce layouts that feel cluttered or don't offer ideal combat arenas. The generation algorithm uses structured corridors, vertical connectors, and open intersection areas to improve layout quality, but results vary by seed.
+
 ## License
 
 MIT
