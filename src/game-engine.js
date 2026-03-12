@@ -249,11 +249,81 @@ function simulateGame(grid, options = {}) {
         if (visited.has(key)) continue;
         if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
         if (hasWallBetween(cur.x, cur.y, nx, ny)) continue;
-        if (tankAt(nx, ny, tankId) && !(nx === toX && ny === toY)) continue;
+        if (tankAt(nx, ny, tankId)) continue;
         visited.add(key);
         const fd = cur.firstDir || dir;
         if (nx === toX && ny === toY) return fd;
         queue.push({ x: nx, y: ny, firstDir: fd });
+      }
+    }
+    return null;
+  }
+
+  // BFS to find the nearest cell with line-of-sight to the target
+  function bfsToFiringPosition(fromX, fromY, targetX, targetY, tankId) {
+    // Already have line of sight from current position
+    if ((fromX === targetX || fromY === targetY) &&
+        hasLineOfSight(fromX, fromY, targetX, targetY)) return null;
+    const visited = new Set([`${fromX},${fromY}`]);
+    const queue = [{ x: fromX, y: fromY, firstDir: null }];
+    let itr = 0;
+    while (queue.length > 0 && itr < 800) {
+      itr++;
+      const cur = queue.shift();
+      for (const dir of DIR_LIST) {
+        const nx = cur.x + dir.dx, ny = cur.y + dir.dy;
+        const key = `${nx},${ny}`;
+        if (visited.has(key)) continue;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        if (hasWallBetween(cur.x, cur.y, nx, ny)) continue;
+        if (tankAt(nx, ny, tankId)) continue;
+        visited.add(key);
+        const fd = cur.firstDir || dir;
+        if ((nx === targetX || ny === targetY) &&
+            hasLineOfSight(nx, ny, targetX, targetY)) return fd;
+        queue.push({ x: nx, y: ny, firstDir: fd });
+      }
+    }
+    return null;
+  }
+
+  // Check if any enemy bullet is heading toward the tank
+  function getBulletThreats(tank) {
+    const threats = [];
+    for (const bullet of bullets) {
+      if (!bullet.alive || bullet.ownerId === tank.id) continue;
+      const { dx, dy } = bullet.dir;
+      if (dx !== 0 && dy === 0 && bullet.y === tank.y) {
+        if ((dx > 0 && bullet.x < tank.x) || (dx < 0 && bullet.x > tank.x)) {
+          if (hasLineOfSight(bullet.x, bullet.y, tank.x, tank.y)) {
+            threats.push(bullet);
+          }
+        }
+      } else if (dy !== 0 && dx === 0 && bullet.x === tank.x) {
+        if ((dy > 0 && bullet.y < tank.y) || (dy < 0 && bullet.y > tank.y)) {
+          if (hasLineOfSight(bullet.x, bullet.y, tank.x, tank.y)) {
+            threats.push(bullet);
+          }
+        }
+      }
+    }
+    return threats;
+  }
+
+  // Find a safe direction to dodge incoming bullets
+  function findEvasionMove(tank, threats) {
+    if (threats.length === 0) return null;
+    const threat = threats[0];
+    const perpDirs = [];
+    if (threat.dir.dx !== 0) {
+      perpDirs.push(DIRECTIONS.UP, DIRECTIONS.DOWN);
+    } else {
+      perpDirs.push(DIRECTIONS.LEFT, DIRECTIONS.RIGHT);
+    }
+    const shuffled = rng.shuffle(perpDirs);
+    for (const dir of shuffled) {
+      if (canMove(tank.x, tank.y, dir) && !tankAt(tank.x + dir.dx, tank.y + dir.dy, tank.id)) {
+        return dir;
       }
     }
     return null;
@@ -337,63 +407,82 @@ function simulateGame(grid, options = {}) {
       return;
     }
 
-    // Priority 2: Shoot blocking wall toward enemy (if no BFS path or wall on direct line)
+    // Priority 2: Evade incoming bullets
+    const threats = getBulletThreats(tank);
+    if (threats.length > 0 && tank.moveCD <= 0) {
+      const evadeDir = findEvasionMove(tank, threats);
+      if (evadeDir) {
+        const nx = tank.x + evadeDir.dx, ny = tank.y + evadeDir.dy;
+        tank.x = nx;
+        tank.y = ny;
+        tank.dir = evadeDir;
+        tank.moveCD = moveCooldownAfterMove;
+        return;
+      }
+    }
+
+    // Priority 3: Shoot wall on cardinal line to enemy to create line of sight
     if (tank.shootCD <= 0) {
-      const hasPath = bfsNextStep(tank.x, tank.y, enemy.x, enemy.y, tank.id);
+      const edx = enemy.x - tank.x;
+      const edy = enemy.y - tank.y;
+      let cardinalDir = null;
+      if (edx === 0 && edy !== 0) cardinalDir = edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP;
+      else if (edy === 0 && edx !== 0) cardinalDir = edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT;
 
-      if (!hasPath) {
-        // No open path — shoot the nearest edge wall toward enemy
-        const edx = enemy.x - tank.x;
-        const edy = enemy.y - tank.y;
-        let primaryDirs = [];
-        if (Math.abs(edx) >= Math.abs(edy)) {
-          if (edx !== 0) primaryDirs.push(edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT);
-          if (edy !== 0) primaryDirs.push(edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP);
-        } else {
-          if (edy !== 0) primaryDirs.push(edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP);
-          if (edx !== 0) primaryDirs.push(edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT);
-        }
-        for (const dir of [...primaryDirs, ...DIR_LIST]) {
-          const w = wallInDir(tank.x, tank.y, dir);
-          if (w) {
-            fireBullet(tank, dir, frameIndex);
-            return;
-          }
-        }
-      } else {
-        // Path exists — try to shortcut by shooting wall on cardinal line to enemy
-        const edx = enemy.x - tank.x;
-        const edy = enemy.y - tank.y;
-        let cardinalDir = null;
-        if (edx === 0 && edy !== 0) cardinalDir = edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP;
-        else if (edy === 0 && edx !== 0) cardinalDir = edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT;
-
-        if (cardinalDir) {
-          const w = wallInDir(tank.x, tank.y, cardinalDir);
-          if (w) {
-            fireBullet(tank, cardinalDir, frameIndex);
-            return;
-          }
+      if (cardinalDir) {
+        const w = wallInDir(tank.x, tank.y, cardinalDir);
+        if (w) {
+          fireBullet(tank, cardinalDir, frameIndex);
+          return;
         }
       }
     }
 
-    // Priority 3: Move toward enemy
-    if (tank.moveCD > 0) return;
+    // Priority 4: Move to a firing position (line of sight to enemy)
+    if (tank.moveCD <= 0) {
+      let moveDir = bfsToFiringPosition(tank.x, tank.y, enemy.x, enemy.y, tank.id);
 
-    let moveDir = bfsNextStep(tank.x, tank.y, enemy.x, enemy.y, tank.id);
+      if (moveDir) {
+        const nx = tank.x + moveDir.dx, ny = tank.y + moveDir.dy;
+        if (canMove(tank.x, tank.y, moveDir) && !tankAt(nx, ny, tank.id)) {
+          tank.x = nx;
+          tank.y = ny;
+          tank.dir = moveDir;
+          tank.moveCD = moveCooldownAfterMove;
+          return;
+        }
+      }
+    }
 
-    // Priority 4: Random walk
-    if (!moveDir) {
+    // Priority 5: Shoot wall toward enemy if no firing position reachable
+    if (tank.shootCD <= 0) {
+      const edx = enemy.x - tank.x;
+      const edy = enemy.y - tank.y;
+      let primaryDirs = [];
+      if (Math.abs(edx) >= Math.abs(edy)) {
+        if (edx !== 0) primaryDirs.push(edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT);
+        if (edy !== 0) primaryDirs.push(edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP);
+      } else {
+        if (edy !== 0) primaryDirs.push(edy > 0 ? DIRECTIONS.DOWN : DIRECTIONS.UP);
+        if (edx !== 0) primaryDirs.push(edx > 0 ? DIRECTIONS.RIGHT : DIRECTIONS.LEFT);
+      }
+      for (const dir of [...primaryDirs, ...DIR_LIST]) {
+        const w = wallInDir(tank.x, tank.y, dir);
+        if (w) {
+          fireBullet(tank, dir, frameIndex);
+          return;
+        }
+      }
+    }
+
+    // Priority 6: Random walk
+    if (tank.moveCD <= 0) {
       const openDirs = DIR_LIST.filter(d => {
         return canMove(tank.x, tank.y, d) && !tankAt(tank.x + d.dx, tank.y + d.dy, tank.id);
       });
-      if (openDirs.length > 0) moveDir = rng.pick(openDirs);
-    }
-
-    if (moveDir) {
-      const nx = tank.x + moveDir.dx, ny = tank.y + moveDir.dy;
-      if (canMove(tank.x, tank.y, moveDir) && !tankAt(nx, ny, tank.id)) {
+      if (openDirs.length > 0) {
+        const moveDir = rng.pick(openDirs);
+        const nx = tank.x + moveDir.dx, ny = tank.y + moveDir.dy;
         tank.x = nx;
         tank.y = ny;
         tank.dir = moveDir;

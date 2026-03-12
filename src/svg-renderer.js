@@ -282,21 +282,78 @@ function renderSVG(gameResult, themeName = 'light') {
   for (const exp of explosions) {
     const center = cellCenter(exp.x, exp.y);
     const isLarge = exp.type === 'tank';
-    const maxR = isLarge ? 12 : 7;
-    const color1 = isLarge ? '#ff4444' : theme.explosion;
-    const color2 = theme.explosionRing;
-    const t0 = ft(exp.frame);
-    const t1 = ft(Math.min(exp.frame + 3, totalFrames - 1));
-    const t2 = ft(Math.min(exp.frame + 8, totalFrames - 1));
 
-    svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="${color1}" opacity="0">\n`;
-    svg += `    <animate attributeName="r" values="0;0;${maxR};${maxR * 0.3}" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
-    svg += `    <animate attributeName="opacity" values="0;0;0.9;0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
-    svg += `  </circle>\n`;
-    svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="none" stroke="${color2}" stroke-width="1.5" opacity="0">\n`;
-    svg += `    <animate attributeName="r" values="0;0;${maxR + 4};${maxR + 8}" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
-    svg += `    <animate attributeName="opacity" values="0;0;0.6;0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
-    svg += `  </circle>\n`;
+    if (isLarge) {
+      // Enhanced tank death explosion
+      const maxR = 14;
+      const t0 = ft(exp.frame);
+      const t1 = ft(Math.min(exp.frame + 2, totalFrames - 1));
+      const t2 = ft(Math.min(exp.frame + 5, totalFrames - 1));
+      const t3 = ft(Math.min(exp.frame + 10, totalFrames - 1));
+
+      // White/yellow flash (inner core)
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="#ffffcc" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR * 0.6};0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;1;0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+
+      // Yellow-orange fireball
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="#ff8800" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR * 0.8};${maxR * 0.3}" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;0.9;0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+
+      // Red outer blast
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="#ff4444" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR};${maxR * 0.4}" keyTimes="0;${t0};${t2};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;0.8;0" keyTimes="0;${t0};${t2};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+
+      // Debris particles flying outward
+      const debrisCount = 6;
+      for (let d = 0; d < debrisCount; d++) {
+        const angle = (d / debrisCount) * Math.PI * 2;
+        const dist = maxR + 8;
+        const px = (center.x + Math.cos(angle) * dist).toFixed(1);
+        const py = (center.y + Math.sin(angle) * dist).toFixed(1);
+        svg += `  <circle cx="${center.x}" cy="${center.y}" r="1.5" fill="#ffaa00" opacity="0">\n`;
+        svg += `    <animate attributeName="cx" values="${center.x};${center.x};${px};${px}" keyTimes="0;${t0};${t2};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `    <animate attributeName="cy" values="${center.y};${center.y};${py};${py}" keyTimes="0;${t0};${t2};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `    <animate attributeName="opacity" values="0;0;1;0" keyTimes="0;${t0};${t1};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `    <animate attributeName="r" values="1.5;1.5;1.5;0.3" keyTimes="0;${t0};${t2};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `  </circle>\n`;
+      }
+
+      // Shockwave ring
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="none" stroke="${theme.explosionRing}" stroke-width="2" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR + 6};${maxR + 12}" keyTimes="0;${t0};${t2};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;0.7;0" keyTimes="0;${t0};${t1};${t3}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+
+      // Smoke cloud (lingers)
+      const tSmoke = ft(Math.min(exp.frame + 14, totalFrames - 1));
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="#555555" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR * 0.4};${maxR * 0.9}" keyTimes="0;${t0};${t2};${tSmoke}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;0.25;0" keyTimes="0;${t0};${t2};${tSmoke}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+    } else {
+      // Wall destruction explosion (unchanged)
+      const maxR = 7;
+      const color1 = theme.explosion;
+      const color2 = theme.explosionRing;
+      const t0 = ft(exp.frame);
+      const t1 = ft(Math.min(exp.frame + 3, totalFrames - 1));
+      const t2 = ft(Math.min(exp.frame + 8, totalFrames - 1));
+
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="${color1}" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR};${maxR * 0.3}" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;0.9;0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+      svg += `  <circle cx="${center.x}" cy="${center.y}" r="0" fill="none" stroke="${color2}" stroke-width="1.5" opacity="0">\n`;
+      svg += `    <animate attributeName="r" values="0;0;${maxR + 4};${maxR + 8}" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `    <animate attributeName="opacity" values="0;0;0.6;0" keyTimes="0;${t0};${t1};${t2}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+      svg += `  </circle>\n`;
+    }
   }
   svg += `</g>\n`;
 
