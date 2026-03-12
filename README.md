@@ -52,6 +52,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
+Ensure to run your workflow via actions.
 
 ### 3. Embed in README
 
