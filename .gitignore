@@ -1,2 +1,19 @@
 node_modules/
 dist/
+
+# Agent artifacts (Claude Code, Codex, OpenCode sessions)
+.claude/plans/
+.claude/memory/
+.claude/settings.json
+.claude/settings.local.json
+.claude/todos/
+.codex/
+.opencode/
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
