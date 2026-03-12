@@ -36,7 +36,7 @@ function shortestArc(current, target) {
 function renderSVG(gameResult, themeName = 'light') {
   const theme = themes[themeName] || themes.light;
   const { frames, allBullets, explosions, wallEvents, muzzleFlashes,
-          tanks, grid, cols, rows, initialGrid, maze } = gameResult;
+          tanks, grid, cols, rows, initialGrid, maze, rounds } = gameResult;
 
   const aliveTanks = tanks.filter(t => t.alive);
   const winner = aliveTanks.length === 1 ? aliveTanks[0] : null;
@@ -202,7 +202,7 @@ function renderSVG(gameResult, themeName = 'light') {
   }
   svg += `</g>\n`;
 
-  // ── Maze walls: thin lines in the gaps between cells ──
+  // ── Maze walls: thin lines in the gaps between cells (per-round) ──
   svg += `<g id="maze-walls">\n`;
 
   // Border rectangle around the entire grid
@@ -212,44 +212,139 @@ function renderSVG(gameResult, themeName = 'light') {
   const borderH = rows * CELL_PITCH - CELL_GAP + BORDER_PADDING;
   svg += `  <rect x="${borderX}" y="${borderY}" width="${borderW}" height="${borderH}" fill="none" stroke="${theme.mazeBorder}" stroke-width="1.5" rx="1" />\n`;
 
-  // Horizontal walls (between rows)
-  for (let c = 0; c < cols; c++) {
-    for (let r = 0; r < rows - 1; r++) {
-      if (!maze.initialHWalls[c][r]) continue;
-      const y = GRID_TOP + r * CELL_PITCH + CELL_SIZE + CELL_GAP / 2;
-      const x1 = GRID_LEFT + c * CELL_PITCH - 1;
-      const x2 = GRID_LEFT + c * CELL_PITCH + CELL_SIZE + 1;
-      const destruction = wallEvents.find(e => e.type === 'h' && e.col === c && e.row === r);
-      if (destruction) {
-        const preT = ft(Math.max(0, destruction.frame - 1));
-        const destT = ft(destruction.frame);
-        const fadeT = ft(Math.min(destruction.frame + 4, totalFrames - 1));
+  // Determine which rounds data to use
+  const activeRounds = rounds && rounds.length > 0 ? rounds : [{
+    startFrame: 0,
+    endFrame: totalFrames - 1,
+    maze: { initialHWalls: maze.initialHWalls, initialVWalls: maze.initialVWalls },
+    wallEvents: wallEvents,
+  }];
+
+  // Render walls for each round
+  for (let ri = 0; ri < activeRounds.length; ri++) {
+    const round = activeRounds[ri];
+    const roundStartF = round.startFrame;
+    const roundEndF = round.endFrame;
+    const isFirstRound = ri === 0;
+    const isLastRound = ri === activeRounds.length - 1;
+
+    // Horizontal walls (between rows)
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows - 1; r++) {
+        if (!round.maze.initialHWalls[c][r]) continue;
+        const y = GRID_TOP + r * CELL_PITCH + CELL_SIZE + CELL_GAP / 2;
+        const x1 = GRID_LEFT + c * CELL_PITCH - 1;
+        const x2 = GRID_LEFT + c * CELL_PITCH + CELL_SIZE + 1;
+        const destruction = round.wallEvents.find(e => e.type === 'h' && e.col === c && e.row === r);
+
+        // Build opacity keyframes: fade-in at round start, visible during round, fade-out on destroy or round end
+        const times = [];
+        const vals = [];
+
+        // Before round start: hidden (except first round)
+        if (!isFirstRound) {
+          times.push(ft(Math.max(0, roundStartF - 2)));
+          vals.push('0');
+          times.push(ft(roundStartF));
+          vals.push('1');
+        } else {
+          times.push('0');
+          vals.push('1');
+        }
+
+        if (destruction) {
+          const preT = ft(Math.max(roundStartF, destruction.frame - 1));
+          const destT = ft(destruction.frame);
+          const fadeT = ft(Math.min(destruction.frame + 4, totalFrames - 1));
+          if (parseFloat(preT) > parseFloat(times[times.length - 1])) {
+            times.push(preT);
+            vals.push('1');
+          }
+          times.push(destT);
+          vals.push('0.3');
+          times.push(fadeT);
+          vals.push('0');
+        } else {
+          // Survive until round end, then fade out (except last round)
+          if (!isLastRound) {
+            const endT = ft(roundEndF);
+            const fadeOutT = ft(Math.min(roundEndF + 2, totalFrames - 1));
+            if (parseFloat(endT) > parseFloat(times[times.length - 1])) {
+              times.push(endT);
+              vals.push('1');
+            }
+            times.push(fadeOutT);
+            vals.push('0');
+          }
+        }
+
+        // Ensure we end at time 1
+        if (parseFloat(times[times.length - 1]) < 1) {
+          times.push('1');
+          vals.push(vals[vals.length - 1]);
+        }
+
         svg += `  <line class="maze-wall" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}">\n`;
-        svg += `    <animate attributeName="opacity" values="1;1;0.3;0" keyTimes="0;${preT};${destT};${fadeT}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `    <animate attributeName="opacity" values="${vals.join(';')}" keyTimes="${times.join(';')}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
         svg += `  </line>\n`;
-      } else {
-        svg += `  <line class="maze-wall" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" />\n`;
       }
     }
-  }
 
-  // Vertical walls (between columns)
-  for (let c = 0; c < cols - 1; c++) {
-    for (let r = 0; r < rows; r++) {
-      if (!maze.initialVWalls[c][r]) continue;
-      const x = GRID_LEFT + c * CELL_PITCH + CELL_SIZE + CELL_GAP / 2;
-      const y1 = GRID_TOP + r * CELL_PITCH - 1;
-      const y2 = GRID_TOP + r * CELL_PITCH + CELL_SIZE + 1;
-      const destruction = wallEvents.find(e => e.type === 'v' && e.col === c && e.row === r);
-      if (destruction) {
-        const preT = ft(Math.max(0, destruction.frame - 1));
-        const destT = ft(destruction.frame);
-        const fadeT = ft(Math.min(destruction.frame + 4, totalFrames - 1));
+    // Vertical walls (between columns)
+    for (let c = 0; c < cols - 1; c++) {
+      for (let r = 0; r < rows; r++) {
+        if (!round.maze.initialVWalls[c][r]) continue;
+        const x = GRID_LEFT + c * CELL_PITCH + CELL_SIZE + CELL_GAP / 2;
+        const y1 = GRID_TOP + r * CELL_PITCH - 1;
+        const y2 = GRID_TOP + r * CELL_PITCH + CELL_SIZE + 1;
+        const destruction = round.wallEvents.find(e => e.type === 'v' && e.col === c && e.row === r);
+
+        const times = [];
+        const vals = [];
+
+        if (!isFirstRound) {
+          times.push(ft(Math.max(0, roundStartF - 2)));
+          vals.push('0');
+          times.push(ft(roundStartF));
+          vals.push('1');
+        } else {
+          times.push('0');
+          vals.push('1');
+        }
+
+        if (destruction) {
+          const preT = ft(Math.max(roundStartF, destruction.frame - 1));
+          const destT = ft(destruction.frame);
+          const fadeT = ft(Math.min(destruction.frame + 4, totalFrames - 1));
+          if (parseFloat(preT) > parseFloat(times[times.length - 1])) {
+            times.push(preT);
+            vals.push('1');
+          }
+          times.push(destT);
+          vals.push('0.3');
+          times.push(fadeT);
+          vals.push('0');
+        } else {
+          if (!isLastRound) {
+            const endT = ft(roundEndF);
+            const fadeOutT = ft(Math.min(roundEndF + 2, totalFrames - 1));
+            if (parseFloat(endT) > parseFloat(times[times.length - 1])) {
+              times.push(endT);
+              vals.push('1');
+            }
+            times.push(fadeOutT);
+            vals.push('0');
+          }
+        }
+
+        if (parseFloat(times[times.length - 1]) < 1) {
+          times.push('1');
+          vals.push(vals[vals.length - 1]);
+        }
+
         svg += `  <line class="maze-wall" x1="${x}" y1="${y1}" x2="${x}" y2="${y2}">\n`;
-        svg += `    <animate attributeName="opacity" values="1;1;0.3;0" keyTimes="0;${preT};${destT};${fadeT}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
+        svg += `    <animate attributeName="opacity" values="${vals.join(';')}" keyTimes="${times.join(';')}" dur="${dur}" fill="freeze" repeatCount="indefinite" />\n`;
         svg += `  </line>\n`;
-      } else {
-        svg += `  <line class="maze-wall" x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" />\n`;
       }
     }
   }

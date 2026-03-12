@@ -132,6 +132,8 @@ function simulateGame(grid, options = {}) {
     moveCooldownAfterShot = 4,
     bulletSpeed = 1,
     seed = 42,
+    numRounds = 3,
+    transitionFrames = 12,
   } = options;
 
   const rng = new RNG(seed);
@@ -158,25 +160,29 @@ function simulateGame(grid, options = {}) {
       }
     }
   }
-  clearSpawnArea(2, 0, 2);
-  clearSpawnArea(cols - 3, 0, 2);
-  clearSpawnArea(1, rows - 1, 2);
-  clearSpawnArea(cols - 2, rows - 1, 2);
 
-  // Add horizontal barriers between vertical spawn pairs to prevent instant kills
-  const midRow = Math.floor(rows / 2);
-  for (let c = 0; c < 5 && c < cols; c++) {
-    if (midRow > 0 && midRow < rows) hWalls[c][midRow - 1] = true;
-    if (midRow < rows - 1)           hWalls[c][midRow] = true;
+  function clearSpawnsAndAddBarriers() {
+    clearSpawnArea(2, 0, 2);
+    clearSpawnArea(cols - 3, 0, 2);
+    clearSpawnArea(1, rows - 1, 2);
+    clearSpawnArea(cols - 2, rows - 1, 2);
+
+    const midRow = Math.floor(rows / 2);
+    for (let c = 0; c < 5 && c < cols; c++) {
+      if (midRow > 0 && midRow < rows) hWalls[c][midRow - 1] = true;
+      if (midRow < rows - 1)           hWalls[c][midRow] = true;
+    }
+    for (let c = Math.max(0, cols - 5); c < cols; c++) {
+      if (midRow > 0 && midRow < rows) hWalls[c][midRow - 1] = true;
+      if (midRow < rows - 1)           hWalls[c][midRow] = true;
+    }
   }
-  for (let c = Math.max(0, cols - 5); c < cols; c++) {
-    if (midRow > 0 && midRow < rows) hWalls[c][midRow - 1] = true;
-    if (midRow < rows - 1)           hWalls[c][midRow] = true;
-  }
+
+  clearSpawnsAndAddBarriers();
 
   // Snapshot the initial maze state for rendering (before bullets destroy walls)
-  const initialHWalls = hWalls.map(col => [...col]);
-  const initialVWalls = vWalls.map(col => [...col]);
+  let initialHWalls = hWalls.map(col => [...col]);
+  let initialVWalls = vWalls.map(col => [...col]);
 
   // ── Edge-wall helpers ─────────────────────────────────────────────
 
@@ -259,13 +265,16 @@ function simulateGame(grid, options = {}) {
     return null;
   }
 
-  // BFS to find the nearest cell with line-of-sight to the target
+  // BFS to find a firing position with line-of-sight to the target, preferring optimal range
   function bfsToFiringPosition(fromX, fromY, targetX, targetY, tankId) {
-    // Already have line of sight from current position
+    // If already have LOS and at good range (3+), stay put
+    const currentDist = Math.abs(fromX - targetX) + Math.abs(fromY - targetY);
     if ((fromX === targetX || fromY === targetY) &&
-        hasLineOfSight(fromX, fromY, targetX, targetY)) return null;
+        hasLineOfSight(fromX, fromY, targetX, targetY) && currentDist >= 3) return null;
+
     const visited = new Set([`${fromX},${fromY}`]);
     const queue = [{ x: fromX, y: fromY, firstDir: null }];
+    const candidates = [];
     let itr = 0;
     while (queue.length > 0 && itr < 800) {
       itr++;
@@ -280,11 +289,24 @@ function simulateGame(grid, options = {}) {
         visited.add(key);
         const fd = cur.firstDir || dir;
         if ((nx === targetX || ny === targetY) &&
-            hasLineOfSight(nx, ny, targetX, targetY)) return fd;
+            hasLineOfSight(nx, ny, targetX, targetY)) {
+          const dist = Math.abs(nx - targetX) + Math.abs(ny - targetY);
+          candidates.push({ dir: fd, dist });
+          if (candidates.length >= 6) break;
+        }
         queue.push({ x: nx, y: ny, firstDir: fd });
       }
+      if (candidates.length >= 6) break;
     }
-    return null;
+
+    if (candidates.length === 0) return null;
+    // Prefer candidates at optimal range (3-8)
+    candidates.sort((a, b) => {
+      const aScore = a.dist >= 3 && a.dist <= 8 ? 0 : Math.abs(a.dist - 5);
+      const bScore = b.dist >= 3 && b.dist <= 8 ? 0 : Math.abs(b.dist - 5);
+      return aScore - bScore;
+    });
+    return candidates[0].dir;
   }
 
   // Check if any enemy bullet is heading toward the tank
@@ -407,6 +429,28 @@ function simulateGame(grid, options = {}) {
       return;
     }
 
+    // Priority 1.5: Retreat if too close to enemy and can't shoot
+    if (tank.moveCD <= 0) {
+      const distToEnemy = Math.abs(enemy.x - tank.x) + Math.abs(enemy.y - tank.y);
+      if (distToEnemy <= 2 && tank.shootCD > 0) {
+        const retreatDirs = DIR_LIST.filter(d => {
+          if (!canMove(tank.x, tank.y, d)) return false;
+          const nx = tank.x + d.dx, ny = tank.y + d.dy;
+          if (tankAt(nx, ny, tank.id)) return false;
+          const newDist = Math.abs(nx - enemy.x) + Math.abs(ny - enemy.y);
+          return newDist > distToEnemy;
+        });
+        if (retreatDirs.length > 0) {
+          const moveDir = rng.pick(retreatDirs);
+          tank.x += moveDir.dx;
+          tank.y += moveDir.dy;
+          tank.dir = moveDir;
+          tank.moveCD = moveCooldownAfterMove;
+          return;
+        }
+      }
+    }
+
     // Priority 2: Evade incoming bullets
     const threats = getBulletThreats(tank);
     if (threats.length > 0 && tank.moveCD <= 0) {
@@ -418,6 +462,27 @@ function simulateGame(grid, options = {}) {
         tank.dir = evadeDir;
         tank.moveCD = moveCooldownAfterMove;
         return;
+      }
+    }
+
+    // Priority 2.5: Strafe after shooting if enemy is close
+    if (tank.moveCD <= 0 && tank.shootCD > shootCooldown - 3) {
+      const distToEnemy = Math.abs(enemy.x - tank.x) + Math.abs(enemy.y - tank.y);
+      if (distToEnemy <= 4) {
+        const perpDirs = [];
+        if (tank.dir.dx !== 0) perpDirs.push(DIRECTIONS.UP, DIRECTIONS.DOWN);
+        else perpDirs.push(DIRECTIONS.LEFT, DIRECTIONS.RIGHT);
+        const strafeDirs = rng.shuffle(perpDirs).filter(d => {
+          return canMove(tank.x, tank.y, d) && !tankAt(tank.x + d.dx, tank.y + d.dy, tank.id);
+        });
+        if (strafeDirs.length > 0) {
+          const moveDir = strafeDirs[0];
+          tank.x += moveDir.dx;
+          tank.y += moveDir.dy;
+          tank.dir = moveDir;
+          tank.moveCD = moveCooldownAfterMove;
+          return;
+        }
       }
     }
 
@@ -544,53 +609,149 @@ function simulateGame(grid, options = {}) {
     }
   }
 
-  // === MAIN LOOP ===
-  for (let frame = 0; frame < maxFrames; frame++) {
-    frames.push({
-      frame,
-      tanks: tanks.map(t => ({
-        id: t.id, x: t.x, y: t.y, dir: t.dir,
-        alive: t.alive, color: t.color, name: t.name, kills: t.kills,
-      })),
-      bullets: bullets.map(b => ({
-        id: b.id, x: b.x, y: b.y, alive: b.alive, ownerId: b.ownerId,
-      })),
-    });
+  // === MULTI-ROUND GAME LOOP ===
+  const framesPerRound = Math.floor((maxFrames - transitionFrames * (numRounds - 1)) / numRounds);
+  const rounds = [];
+  let currentFrame = 0;
 
-    const aliveTanks = tanks.filter(t => t.alive);
-    if (aliveTanks.length <= 1) {
-      for (let extra = 0; extra < 8; extra++) {
+  // Tank starting positions for reset
+  const tankStartPositions = [
+    { x: 2, y: 0, dir: DIRECTIONS.RIGHT, shootCD: 6 },
+    { x: cols - 3, y: 0, dir: DIRECTIONS.LEFT, shootCD: 8 },
+    { x: 1, y: rows - 1, dir: DIRECTIONS.RIGHT, shootCD: 7 },
+    { x: cols - 2, y: rows - 1, dir: DIRECTIONS.LEFT, shootCD: 10 },
+  ];
+
+  // Store first round maze for backward compat
+  const firstRoundInitialHWalls = initialHWalls.map(col => [...col]);
+  const firstRoundInitialVWalls = initialVWalls.map(col => [...col]);
+
+  for (let round = 0; round < numRounds; round++) {
+    // Between rounds: regenerate maze and reset state
+    if (round > 0) {
+      // Add transition frames (dead time for visual pause)
+      for (let t = 0; t < transitionFrames; t++) {
         frames.push({
-          frame: frame + extra + 1,
+          frame: currentFrame,
           tanks: tanks.map(t => ({
             id: t.id, x: t.x, y: t.y, dir: t.dir,
             alive: t.alive, color: t.color, name: t.name, kills: t.kills,
           })),
           bullets: [],
+          transition: true,
         });
+        currentFrame++;
       }
-      break;
+
+      // Regenerate maze (rng continues deterministically)
+      const newMaze = generateMaze(cols, rows, rng);
+
+      // Mutate hWalls in-place: clear then copy
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows - 1; r++) {
+          hWalls[c][r] = newMaze.hWalls[c][r];
+        }
+      }
+      for (let c = 0; c < cols - 1; c++) {
+        for (let r = 0; r < rows; r++) {
+          vWalls[c][r] = newMaze.vWalls[c][r];
+        }
+      }
+
+      // Re-clear spawn areas and add barriers
+      clearSpawnsAndAddBarriers();
+
+      // Update initial maze snapshots for this round
+      initialHWalls = hWalls.map(col => [...col]);
+      initialVWalls = vWalls.map(col => [...col]);
+
+      // Reset tanks to starting positions
+      for (let i = 0; i < tanks.length; i++) {
+        tanks[i].x = tankStartPositions[i].x;
+        tanks[i].y = tankStartPositions[i].y;
+        tanks[i].dir = tankStartPositions[i].dir;
+        tanks[i].alive = true;
+        tanks[i].shootCD = tankStartPositions[i].shootCD;
+        tanks[i].moveCD = 0;
+        tanks[i].deathFrame = undefined;
+      }
+
+      // Clear active bullets
+      bullets.length = 0;
     }
 
-    const order = rng.shuffle([0, 1, 2, 3]);
-    for (const idx of order) tankAction(tanks[idx], frame);
-    updateBullets(frame);
+    const roundStartFrame = currentFrame;
+    const roundWallEventsStart = wallEvents.length;
+
+    // Snapshot maze state at the start of this round
+    const roundInitialHWalls = hWalls.map(col => [...col]);
+    const roundInitialVWalls = vWalls.map(col => [...col]);
+
+    // Round game loop
+    const roundEndFrame = currentFrame + framesPerRound;
+    for (; currentFrame < roundEndFrame; currentFrame++) {
+      frames.push({
+        frame: currentFrame,
+        tanks: tanks.map(t => ({
+          id: t.id, x: t.x, y: t.y, dir: t.dir,
+          alive: t.alive, color: t.color, name: t.name, kills: t.kills,
+        })),
+        bullets: bullets.map(b => ({
+          id: b.id, x: b.x, y: b.y, alive: b.alive, ownerId: b.ownerId,
+        })),
+      });
+
+      const aliveTanks = tanks.filter(t => t.alive);
+      if (aliveTanks.length <= 1) {
+        for (let extra = 0; extra < 8; extra++) {
+          frames.push({
+            frame: currentFrame + extra + 1,
+            tanks: tanks.map(t => ({
+              id: t.id, x: t.x, y: t.y, dir: t.dir,
+              alive: t.alive, color: t.color, name: t.name, kills: t.kills,
+            })),
+            bullets: [],
+          });
+        }
+        currentFrame += 9;
+        break;
+      }
+
+      const order = rng.shuffle([0, 1, 2, 3]);
+      for (const idx of order) tankAction(tanks[idx], currentFrame);
+      updateBullets(currentFrame);
+    }
+
+    const aliveFinalRound = tanks.filter(t => t.alive);
+    const roundWinner = aliveFinalRound.length === 1 ? aliveFinalRound[0] : null;
+
+    rounds.push({
+      startFrame: roundStartFrame,
+      endFrame: currentFrame,
+      maze: {
+        initialHWalls: roundInitialHWalls,
+        initialVWalls: roundInitialVWalls,
+      },
+      wallEvents: wallEvents.slice(roundWallEventsStart),
+      winner: roundWinner,
+    });
   }
 
   const initialGrid = grid.map(col => col.map(cell => ({ ...cell })));
   const aliveFinal = tanks.filter(t => t.alive);
   const winner = aliveFinal.length === 1 ? aliveFinal[0] : null;
 
-  // Count maze walls for stats
+  // Count maze walls for stats (first round)
   let mazeWallCount = 0;
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows - 1; r++) if (initialHWalls[c][r]) mazeWallCount++;
-  for (let c = 0; c < cols - 1; c++) for (let r = 0; r < rows; r++) if (initialVWalls[c][r]) mazeWallCount++;
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows - 1; r++) if (firstRoundInitialHWalls[c][r]) mazeWallCount++;
+  for (let c = 0; c < cols - 1; c++) for (let r = 0; r < rows; r++) if (firstRoundInitialVWalls[c][r]) mazeWallCount++;
 
   return {
     frames, allBullets, explosions, wallEvents, muzzleFlashes, killEvents,
     tanks, winner, grid, cols, rows, initialGrid,
-    maze: { hWalls, vWalls, initialHWalls, initialVWalls },
+    maze: { hWalls, vWalls, initialHWalls: firstRoundInitialHWalls, initialVWalls: firstRoundInitialVWalls },
     mazeWallCount,
+    rounds,
   };
 }
 
