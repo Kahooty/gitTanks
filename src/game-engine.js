@@ -33,6 +33,8 @@ class RNG {
   }
 }
 
+const EXTRA_WALL_REMOVAL_RATE = 0.30;
+
 /**
  * Generate a maze on the grid using edge walls (walls between cells).
  *
@@ -111,7 +113,7 @@ function generateMaze(cols, rows, rng) {
     }
   }
 
-  const toRemove = Math.floor(remaining.length * 0.30);
+  const toRemove = Math.floor(remaining.length * EXTRA_WALL_REMOVAL_RATE);
   const shuffled = rng.shuffle(remaining);
   for (let i = 0; i < toRemove; i++) {
     const w = shuffled[i];
@@ -164,12 +166,12 @@ function simulateGame(grid, options = {}) {
   // Add horizontal barriers between vertical spawn pairs to prevent instant kills
   const midRow = Math.floor(rows / 2);
   for (let c = 0; c < 5 && c < cols; c++) {
-    if (midRow > 0 && midRow - 1 < rows - 1) hWalls[c][midRow - 1] = true;
-    if (midRow < rows - 1)                    hWalls[c][midRow] = true;
+    if (midRow > 0 && midRow < rows) hWalls[c][midRow - 1] = true;
+    if (midRow < rows - 1)           hWalls[c][midRow] = true;
   }
   for (let c = Math.max(0, cols - 5); c < cols; c++) {
-    if (midRow > 0 && midRow - 1 < rows - 1) hWalls[c][midRow - 1] = true;
-    if (midRow < rows - 1)                    hWalls[c][midRow] = true;
+    if (midRow > 0 && midRow < rows) hWalls[c][midRow - 1] = true;
+    if (midRow < rows - 1)           hWalls[c][midRow] = true;
   }
 
   // Snapshot the initial maze state for rendering (before bullets destroy walls)

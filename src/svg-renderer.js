@@ -16,6 +16,8 @@ const GRID_TOP = 10;
 const TANK_SIZE = 10;
 const BULLET_R = 2;
 const FRAME_MS = 350;
+const BORDER_OFFSET = 1.5;
+const BORDER_PADDING = BORDER_OFFSET * 2;
 
 function cellCenter(col, row) {
   return {
@@ -204,10 +206,10 @@ function renderSVG(gameResult, themeName = 'light') {
   svg += `<g id="maze-walls">\n`;
 
   // Border rectangle around the entire grid
-  const borderX = GRID_LEFT - 1.5;
-  const borderY = GRID_TOP - 1.5;
-  const borderW = cols * CELL_PITCH - CELL_GAP + 3;
-  const borderH = rows * CELL_PITCH - CELL_GAP + 3;
+  const borderX = GRID_LEFT - BORDER_OFFSET;
+  const borderY = GRID_TOP - BORDER_OFFSET;
+  const borderW = cols * CELL_PITCH - CELL_GAP + BORDER_PADDING;
+  const borderH = rows * CELL_PITCH - CELL_GAP + BORDER_PADDING;
   svg += `  <rect x="${borderX}" y="${borderY}" width="${borderW}" height="${borderH}" fill="none" stroke="${theme.mazeBorder}" stroke-width="1.5" rx="1" />\n`;
 
   // Horizontal walls (between rows)
